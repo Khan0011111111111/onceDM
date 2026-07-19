@@ -188,16 +188,38 @@
     }
 
     if (message.action === "DOWNLOAD_SINGLE") {
-      chrome.downloads.download({
-        url: message.url,
-        filename: sanitizeFilename(message.filename),
-        saveAs: false,
-      })
-        .then((downloadId) => sendResponse({ success: true, id: downloadId }))
-        .catch((error) => sendResponse({ success: false, error: error.message }));
-      return true;
+  // 1. Fetch the video with the correct Referer header
+  fetch(message.url, {
+    headers: {
+      'Referer': 'https://www.instagram.com/',
+    },
+  })
+  .then(response => {
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
-
-    return false;
+    return response.blob(); // Get the video data as a Blob
+  })
+  .then(blob => {
+    // 2. Create an object URL from the blob
+    const objectUrl = URL.createObjectURL(blob);
+    // 3. Start the download using that object URL
+    return chrome.downloads.download({
+      url: objectUrl,
+      filename: sanitizeFilename(message.filename),
+      saveAs: false,
+    }).then(downloadId => {
+      // 4. Revoke the object URL after a short delay to allow the download to start
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+      return downloadId;
+    });
+  })
+  .then((downloadId) => {
+    sendResponse({ success: true, id: downloadId });
+  })
+  .catch((error) => {
+    console.error('Download failed:', error);
+    sendResponse({ success: false, error: error.message });
   });
-})();
+  return true; // Keep the message channel open for async response
+}
